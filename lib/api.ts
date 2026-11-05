@@ -1,10 +1,9 @@
 /**
- * Backend API istemcisi. Tüm istekler buradan geçer.
- * Cookies otomatik gönderilir (session auth için).
+ * API istemcisi. Server ve browser'da farklı base URL kullanır:
+ *  - Browser: relative (/api/...) → Next.js rewrites backend'e proxy'ler
+ *  - Server (Node): absolute (INTERNAL_API_BASE_URL) → doğrudan backend
+ * Cookie'ler browser'da same-origin olarak gider.
  */
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export type ApiError = {
   code: string;
@@ -26,9 +25,16 @@ export class ApiRequestError extends Error {
   }
 }
 
+function baseUrl(): string {
+  if (typeof window === "undefined") {
+    return process.env.INTERNAL_API_BASE_URL ?? "http://localhost:8000";
+  }
+  return ""; // browser: relative → proxy
+}
+
 function getCsrfToken(): string | null {
   if (typeof document === "undefined") return null;
-  const match = document.cookie.match(/csrftoken=([^;]+)/);
+  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
@@ -41,22 +47,19 @@ export async function apiFetch<T>(
     ...(options.headers as Record<string, string> | undefined),
   };
 
-  // CSRF: sadece state-changing metotlar için
   const method = (options.method ?? "GET").toUpperCase();
   if (method !== "GET" && method !== "HEAD") {
     const csrf = getCsrfToken();
     if (csrf) headers["X-CSRFToken"] = csrf;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${baseUrl()}${path}`, {
     ...options,
     headers,
-    credentials: "include", // session cookie'yi gönder
+    credentials: "include",
   });
 
-  if (res.status === 204) {
-    return undefined as T;
-  }
+  if (res.status === 204) return undefined as T;
 
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
